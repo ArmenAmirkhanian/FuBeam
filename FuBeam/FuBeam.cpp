@@ -34,10 +34,57 @@ SOFTWARE.
 #include <exception>
 #include <cmath>
 
+// Deflection due to uniform load and Winkler foundation
+double uni_defl(double beta, double UW, double L, double C2, double C3, double C4, double C11, double E, double I, double x){
+	// Ra, Ma, and thetaA boundary conditions go to zero for loading conditions
+	// The entire equation for uniform load deflection is included in case
+	// there is a desire to model different conditions in the future
+	double Ra, Ma, thetaA, F1, F2, F3, F4, F5, wAp;
+
+	Ra = 0;
+	Ma = 0;
+	thetaA = 0;
+
+	F1 = cosh(beta*x)*cos(beta*x);
+	F2 = cosh(beta*x)*sin(beta*x) + sinh(beta*x)*cos(beta*x);
+	F3 = sinh(beta*x)*sin(beta*x);
+	F5 = 1 - cosh(beta*x)*cos(beta*x);
+
+	wAp = (UW*(C4*C2 - 2 * pow(C3, 2))) / (4 * E*I*pow(beta, 4)*C11);
+
+	double wp;
+	wp = wAp*F1 + (thetaA*F2) / (2 * beta) + (Ma*F3) / (2 * E*I*pow(beta, 2)) + (Ra*F4) / (4 * E*I*pow(beta, 3)) - (UW*F5) / (4 * E*I*pow(beta, 4));
+	return wp;
+}
+
+// Deflection due to temperature differential
+double temp_defl(double dT, double beta, double t, double gamma, double E, double I, double C1, double C2, double C3, double C4, double C11){
+	
+	// Ra and Ma boundary conditions go to zero for the loading conditions
+	// The entire equation of temperature deflection is included in case
+	// there is a desire to model different conditions in the future
+	double Ra, Ma, F1, F2, F3, F4, thetaA, wAT, x;
+
+	Ra = 0;
+	Ma = 0;
+
+	thetaA = (-(dT)*gamma*(C1*C2 + C3*C4 - C2)) / (beta*t*C11);
+	wAT = (-(dT)*gamma*(pow(C4, 2) + 2 * C1*C3 - 2 * C3)) / (2 * pow(beta, 2)*t*C11);
+
+	F1 = cosh(beta*x)*cos(beta*x);
+	F2 = cosh(beta*x)*sin(beta*x) + sinh(beta*x)*cos(beta*x);
+	F3 = sinh(beta*x)*sin(beta*x);
+
+	double wt;
+	wt = wAT*F1 + (thetaA*F2) / (2 * beta) + (Ma*F3) / (2 * E*I*pow(beta, 2)) + (Ra*F4) / (4 * E*I*pow(beta, 3)) - ((dT)*gamma*F3) / (2 * t*pow(beta, 2));
+	return wt;
+}
+
 int main(){
-	std::string temp_diff, beam_thick, beam_leng, Em, rho, cote, kvalue;
+	std::string temp_diff, beam_thick, beam_leng, beam_width, Em, rho, cote, kvalue;
 	std::string num_points, file_name;
-	double dT, h, L, E, UW, alpha, k;
+	double dT, h, L, bo, E, UW, gamma, k, x;
+	int N;
 
 	std::cout << "Enter temperature differential (deg F): ";
 	std::cin >> temp_diff;
@@ -48,6 +95,9 @@ int main(){
 	std::cout << "Enter beam length (in): ";
 	std::cin >> beam_leng;
 	std::cout << beam_leng << " in\n";
+	std::cout << "Enter beam width (in): ";
+	std::cin >> beam_width;
+	std::cout << beam_width << " in\n";
 	std::cout << "Enter beam modulus of elasticity (psi): ";
 	std::cin >> Em;
 	std::cout << Em << " psi\n";
@@ -71,10 +121,12 @@ int main(){
 		dT = stod(temp_diff);
 		h = stod(beam_thick);
 		L = stod(beam_leng);
+		bo = stod(beam_width);
 		E = stod(Em);
 		UW = stod(rho);
-		alpha = stod(cote);
+		gamma = stod(cote);
 		k = stod(kvalue);
+		N = stod(num_points);
 	}
 	catch (const std::invalid_argument ia){
 		std::cout << "\nOne of the values entered is incorrect.\nGeneral Error: INVALID ARGUMENT\nSpecific Error: " << ia.what() << "\nTHIS ERROR IS IRRECOVERABLE. PROGRAM TERMINATING...\n";
@@ -94,5 +146,39 @@ int main(){
 	catch (std::ofstream::failure e){
 		std::cout << "Failure reading creating file. Please make sure the file name does not conflict with an existing name. Also make sure you have write access to the location you are outputting data to.";
 		exit(EXIT_FAILURE);
+	}
+	// Calculate moment of inertia
+	double I;
+	I = (bo*pow(h,3)) / 12.0;
+
+	// Calculate beta factor, constant for any location
+	double beta;
+	beta = pow((bo*k)/(4*E*I), 1.0 / 4.0);
+
+	// Calculate boundary condition factors
+	double C1, C2, C3, C4, C11;
+	C1 = cosh(beta*L)*cos(beta*L);
+	C2 = cosh(beta*L)*sin(beta*L) + sinh(beta*L)*cos(beta*L);
+	C3 = sinh(beta*L)*sin(beta*L);
+	C4 = cosh(beta*L)*sin(beta*L) - sinh(beta*L)*cos(beta*L);
+	C11 = pow(sinh(beta*L), 2) - pow(sin(beta*L), 2);
+
+	// Write header for output file
+	output_file << "Output file from FuBeam\n";
+	output_file << "Temperature differential: " << temp_diff << " deg F\n";
+	output_file << "Beam thickness: " << beam_thick << " in\n";
+	output_file << "Beam length: " << beam_leng << " in\n";
+	output_file << "Beam width: " << beam_width << " in\n";
+	output_file << "Elastic Modulus: " << Em << " psi\n";
+	output_file << "Unit weight: " << rho << " lbs/ft3\n";
+	output_file << "Coeff. of thermal expansion: " << cote << "E-05 /F\n";
+	output_file << "Subgrade modulus: " << kvalue << " pci\n";
+	output_file << num_points << " points will be generated.\n";
+	output_file << "Dist. From End [in]\t" << "Deflection [in]\n";
+
+	for (int i = 0; i < N; i++){
+		x = (i / N)*L;
+		output_file << x << "\t";
+		output_file << temp_defl(dT, beta, h, gamma, E, I, C1, C2, C3, C4, C11) + uni_defl(beta, UW, L, C2, C3, C4, C11, E, I, x) << "\n";
 	}
 }
