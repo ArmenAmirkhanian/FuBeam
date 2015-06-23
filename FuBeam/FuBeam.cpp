@@ -42,20 +42,25 @@ void reset_zero(double *in_Arry, int Num_elements){
 	}
 }
 
+// Creep calculation based on a modified B3 model
+double creep_calc(){
+
+}
+
 
 // Deflection due to catilever condition at the separation point
 double cant_defl(double UW, double LCant, double E, double I, double localX){
 	double Ra, Rb, Ma, Mb, thetaA, thetaB, yA, yB;
 
-	Rb = 0;
-	Mb = 0;
-	thetaA = 0;
-	yA = 0;
+	Rb = UW*LCant;
+	Mb = (-UW*pow(LCant, 2)) / 2;
+	thetaA = (UW*pow(LCant, 3)) / (6 * E*I);
+	yA = (-UW*pow(LCant, 3) * 3 * LCant) / (24 * E*I);
 
-	thetaB = (UW*pow(LCant, 3)) / (6 * E*I);
-	yB = (-UW*pow(LCant, 3) * 3 * LCant) / (24 * E*I);
-	Ra = UW*LCant;
-	Ma = (-UW*pow(LCant, 2)) / 2;
+	thetaB = 0;
+	yB = 0;
+	Ra = 0;
+	Ma = 0;
 
 	double y;
 	y = yA + thetaA + thetaA*localX + (Ma*pow(localX, 2)) / (2 * E*I) + (Ra*pow(localX, 3)) / (6 * E*I) - (UW*pow(localX, 4)) / (24 * E*I);
@@ -262,7 +267,7 @@ void type1_Analysis(){
 
 // Iterative deflection analysis to match actual beam deflection with equivalent temperature deflection
 // Performs calculations in 0.1 deg F increments and uses RMSE to find best fit
-// Analysis will stop once the RMSE reaches a minimum value
+// Analysis will calculate over entire 50 deg range then find smallest RMSE
 void type2_Analysis(){
 	std::string radius, cen_defl, beam_thick, beam_leng, beam_width, Em, rho, cote, kvalue;
 	std::string num_points, file_name;
