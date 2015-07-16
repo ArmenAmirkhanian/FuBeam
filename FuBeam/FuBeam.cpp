@@ -65,16 +65,17 @@ double newt_rap(double UW, double lambda, double Mt, double L){
 	double Q_dis_sup, Q_dis_sup_prime, Q_mom_sup, Q_mom_sup_prime, Q_cant, Q_cant_prime;
 	double fx, fprimeX, MT;
 	old_x = 4.0; //This should be reasonably far enough away from 0 so root analysis doesn't fail
-	MT = -(UW*(L - old_x)*(L - old_x)) / 2 + Mt;
+	
 	for (int i = 1; i <= max_iterations; i++){
+		MT = -(UW*((L - old_x)/2)*((L - old_x)/2)) / 2 + Mt;
 		Q_dis_sup = (UW / (2 * lambda))*((sinh(lambda*old_x) + sin(lambda*old_x)) / (cosh(lambda*old_x) + cos(lambda*old_x)));
 		Q_dis_sup_prime = (UW*(cos(lambda*old_x)*cosh(lambda*old_x) + 1)) / pow(cos(lambda*old_x) + cosh(lambda*old_x), 2);
 		Q_mom_sup = -MT*lambda*((sinh(lambda*old_x) - sin(lambda*old_x)) / (cosh(lambda*old_x) + cos(lambda*old_x)));
 		Q_mom_sup_prime = -(2 * lambda*lambda*MT*sin(lambda*old_x)*sinh(lambda*old_x)) / pow(cos(lambda*old_x) + cosh(lambda*old_x), 2);
-		Q_cant = -UW*((L - old_x) / 2);
-		Q_cant_prime = UW / 2;
-		fx = Q_dis_sup + Q_mom_sup + Q_cant;
-		fprimeX = Q_dis_sup_prime + Q_mom_sup_prime + Q_cant_prime;
+		Q_cant = UW*((L - old_x) / 2);
+		Q_cant_prime = -UW/2;
+		fx = Q_dis_sup + Q_mom_sup - Q_cant;
+		fprimeX = Q_dis_sup_prime + Q_mom_sup_prime - Q_cant_prime;
 
 		if (abs(fprimeX) < epsilon){
 			std::cout << "Epsilon threshold exceeded during Newton-Raphson.";
@@ -197,7 +198,7 @@ void type1_Analysis(){
 	// This value is the continuity between the elastic foundation
 	// and the cantilevered section
 	double MT;
-	MT = -(-UW*((L - elastic_beam_length)/2)*((L - elastic_beam_length)/2)) / 2 + Mt;
+	MT = (-UW*((L - elastic_beam_length)/2)*((L - elastic_beam_length)/2)) / 2 + Mt;
 
 	// Write headers for output files
 	write_header(output_file1, temp_diff, beam_thick, beam_leng, beam_width, Em, rho, cote, kvalue, elastic_beam_length);
@@ -237,7 +238,7 @@ void type1_Analysis(){
 			theta_dis = ((UW*lambda) / (bo*k))*(1 / A1)*(sinh(lambda*x)*cos(lambda*xp) + cosh(lambda*x)*sin(lambda*xp) - sinh(lambda*xp)*cos(lambda*x) - cosh(lambda*xp)*sin(lambda*x));
 			theta_mom = ((2 * MT*lambda*lambda*lambda) / (bo*k))*(1 / A1)*(cosh(lambda*x)*sin(lambda*xp) - sinh(lambda*x)*cos(lambda*xp) - cosh(lambda*xp)*sin(lambda*x) + sinh(lambda*xp)*cos(lambda*x));
 
-			M_dis = (-UW / (2 * lambda*lambda))*((sinh(lambda*x)*sin(lambda*xp) + sinh(lambda*xp)*sin(lambda*x)) / A1);
+			M_dis = (UW / (2 * lambda*lambda))*((sinh(lambda*x)*sin(lambda*xp) + sinh(lambda*xp)*sin(lambda*x)) / A1);
 			M_mom = MT*((cosh(lambda*x)*cos(lambda*xp) + cosh(lambda*xp)*cos(lambda*x)) / A1);
 
 			Q_dis = (-UW / (2 * lambda))*(1 / A1)*(sinh(lambda*x)*cos(lambda*xp) - cosh(lambda*x)*sin(lambda*xp) + cosh(lambda*xp)*sin(lambda*x) - sinh(lambda*xp)*cos(lambda*x));
@@ -253,8 +254,7 @@ void type1_Analysis(){
 		double LCant = L / 2 - elastic_beam_length / 2;
 		double prev_xs = xs;
 		double eqslp; // this is the equivalent slope boundary condition
-		eqslp =	((-UW*lambda)/(bo*k))*((sinh(lambda*elastic_beam_length)-sin(lambda*elastic_beam_length))/A1) + ((-2*MT*lambda*lambda*lambda)/(bo*k))*((sinh(lambda*elastic_beam_length)+sin(lambda*elastic_beam_length))/A1);
-		UW = -1 * UW;
+		eqslp =	((UW*lambda)/(bo*k))*((sinh(lambda*elastic_beam_length)-sin(lambda*elastic_beam_length))/A1) + ((2*MT*lambda*lambda*lambda)/(bo*k))*((sinh(lambda*elastic_beam_length)+sin(lambda*elastic_beam_length))/A1);
 		double c_def, c_slp, c_mom, c_shr;
 		for (int k = 0; k <= N; k++){
 			xs = prev_xs + ((double)k / (double)N)*LCant;
@@ -263,13 +263,13 @@ void type1_Analysis(){
 			// M(Lcant) = Mt
 			c_shr = -UW*x + UW*LCant;
 			c_mom = -(UW*x*x) / 2 + UW*LCant*x - (UW*LCant*LCant) / 2 + Mt;
-			c_slp = -(UW*x*x*x) / (6 * E*I) + (UW*LCant*x*x) / (2 * E*I) - (UW*LCant*LCant*x)/(2*E*I) + (-Mt*x) / (E*I) + eqslp;
-			c_def = -(UW*x*x*x*x) / (24 * E*I) + (UW*LCant*x*x*x) / (6 * E*I) - (UW*LCant*LCant*x*x) / (4 * E*I) + (-Mt*x*x) / (2 * E*I) + eqslp*x;
+			c_slp = -(UW*x*x*x) / (6 * E*I) + (UW*LCant*x*x) / (2 * E*I) - (UW*LCant*LCant*x)/(2*E*I) + (Mt*x) / (E*I) + eqslp;
+			c_def = -(UW*x*x*x*x) / (24 * E*I) + (UW*LCant*x*x*x) / (6 * E*I) - (UW*LCant*LCant*x*x) / (4 * E*I) + (Mt*x*x) / (2 * E*I) + eqslp*x;
 
-			output_file1 << xs << "\t" << "0.000" << "\t" << "0.000" << "\t" << c_def << "\t" << c_def << "\n";
-			output_file2 << xs << "\t" << "0.000" << "\t" << "0.000" << "\t" << c_slp << "\t" << c_slp << "\n";
+			output_file1 << xs << "\t" << "0.000" << "\t" << "0.000" << "\t" << -c_def << "\t" << -c_def << "\n";
+			output_file2 << xs << "\t" << "0.000" << "\t" << "0.000" << "\t" << -c_slp << "\t" << -c_slp << "\n";
 			output_file3 << xs << "\t" << "0.000" << "\t" << "0.000" << "\t" << c_mom << "\t" << c_mom << "\n";
-			output_file4 << xs << "\t" << "0.000" << "\t" << "0.000" << "\t" << c_shr << "\t" << c_shr << "\n";
+			output_file4 << xs << "\t" << "0.000" << "\t" << "0.000" << "\t" << -c_shr << "\t" << -c_shr << "\n";
 		}
 	}
 	
