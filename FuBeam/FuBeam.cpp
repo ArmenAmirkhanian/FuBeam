@@ -35,222 +35,83 @@ SOFTWARE.
 #include <exception>
 #include <cmath>
 
-double C1, C2, C3, C4, C11, C13;
+// Initialize flags
+bool solution_found = false;
+bool max_iter_hit = false;
 
-// Reset all array elements to zero
-void reset_zero(double *in_Arry, int Num_elements){
-	for (int i = 0; i < Num_elements; i++){
-		in_Arry[i] = 0;
-	}
+void write_header(std::ofstream& output_file_stream, std::string temp_diff, std::string beam_thick, std::string beam_leng, std::string beam_width, std::string Em, std::string rho, std::string cote, std::string kvalue, double elastic_beam_length){
+	output_file_stream << "Output file from FuBeam\n";
+	output_file_stream << "Temperature differential or moment: " << temp_diff << " deg F or in*lb\n";
+	output_file_stream << "Beam thickness: " << beam_thick << " in\n";
+	output_file_stream << "Beam length: " << beam_leng << " in\n";
+	output_file_stream << "Beam width: " << beam_width << " in\n";
+	output_file_stream << "Elastic Modulus: " << Em << " psi\n";
+	output_file_stream << "Unit weight: " << rho << " lbs/ft3\n";
+	output_file_stream << "Coeff. of thermal expansion: " << cote << "E-05 /F\n";
+	output_file_stream << "Subgrade modulus: " << kvalue << " pci\n";
+	output_file_stream << "Point of Separation: " << elastic_beam_length / 2 << " inches from middle of beam.\n";
+	output_file_stream << "Dist. From Middle [in]\t" << "El. Temp. Deflection [in]\t" << "El. Self-Weight Deflection [in]\t" << "Cantilever Deflection (Temp. + Self-Weight) [in]\t" << "Total Deflection [in]\n";
 }
 
-// Deflection due to catilever condition at the separation point
-double cant_defl(double dT, double beta, double gamma, double UW, double LCant, double E, double I, double localX, double t, double slope_in, int return_type){
-	double Ra, Rb, Ma, Mb, Mt, thetaA, thetaB, yA, yB;
+double newt_rap(double UW, double lambda, double Mt, double L, double k){
+	// Use Newton-Raphson to find the root. Basically, you're trying to find a length of beam that
+	// when placed on the elastic foundation has exactly zero deflection at the ends. Newton-Raphson 
+	// is used since the derivative of the deflection function is known analytically and is smooth.
+	double tolerance = 1.0E-10; // difference between two predictions
+	double epsilon = 1.0E-15; // smallest number to use in a calculation, roughly one order of magnitude larger than machine epsilon for type double
+	int max_iterations = 1000; // this is probably overkill since both f and f' are smooth
 
-	Rb = UW*LCant;
-	Mb = (-UW*pow(LCant, 2)) / 2;
-	thetaA = (UW*pow(LCant, 3)) / (6 * E*I);
-	yA = (-UW*pow(LCant, 3) * 3 * LCant) / (24 * E*I);
-	Ma = 0.0;
+	double old_x, new_x, elastic_beam_length;
+	double y_dis_sup, y_dis_sup_prime, y_mom_sup, y_mom_sup_prime;
+	double fx, fprimeX, MT, ls;
+	
+	ls = L / 2;
+	old_x = ls*0.2; //This should be reasonably far enough away from 0 so root analysis doesn't fail
 
-	// Simply supported and guided
-	//yA = (-UW * 5 * LCant*LCant*LCant*LCant) / (24 * E*I);
-	//Ma = (UW*LCant*LCant) / 2;
-	//thetaA = 0;
+	for (int i = 1; i <= max_iterations; i++){
+		MT = -(UW*((ls - old_x)*(ls - old_x))) / 2 + Mt;
+		y_dis_sup = -UW/k;
+		y_dis_sup_prime = 0;
+		y_mom_sup = -((2*MT*lambda*lambda)/k)*((sinh(lambda*old_x*2)-sin(lambda*old_x*2))/(sinh(lambda*old_x*2)+sin(lambda*old_x*2)));
+		y_mom_sup_prime = -((4*MT*lambda*lambda*lambda)/(k))*((cosh(lambda*old_x*2)-cos(lambda*old_x*2))/(sinh(lambda*old_x*2)+sin(lambda*old_x*2)));
+		fx = y_dis_sup + y_mom_sup;
+		fprimeX = y_dis_sup_prime + y_mom_sup_prime;
 
+		if (abs(fprimeX) < epsilon){
+			std::cout << "Epsilon threshold exceeded during Newton-Raphson.";
+			elastic_beam_length = -1;
+			break;
+		}
+		new_x = old_x - fx / fprimeX;
 
-	thetaB = 0.0;
-	yB = 0.0;
-	Ra = 0.0;
-	// Moment from temperature differential
-	Mt = (-gamma*E*I*dT)/t;
+		if (abs(old_x - new_x) / abs(new_x) < tolerance){
+			solution_found = true;
+			if (new_x > ls){
+				elastic_beam_length = ls;
+			}
+			else{
+				elastic_beam_length = new_x;
+			}
+			
+			break;
+		}
 
-	double y, slope, moment, shear;
+		if (i == max_iterations){
+			max_iter_hit = true;
+			elastic_beam_length = -1;
+		}
 
-	switch (return_type)
-	{
-	case 1:
-		// Deflection due only to cantilever
-		//y = yA + thetaA + thetaA*localX + (Ma*pow(localX, 2)) / (2 * E*I) + (Ra*pow(localX, 3)) / (6 * E*I) - (UW*pow(localX, 4)) / (24 * E*I);
-		y = (-UW*(LCant - localX)*(LCant - localX)*(LCant - localX)*(LCant - localX)) / (24 * E*I) + (UW*LCant*(LCant - localX)*(LCant - localX)*(LCant - localX)) / (6 * E*I) + (-dT*gamma*(C1*C2 + C3*C4 - C2)*(LCant - localX)) / (beta*t*C11);
-		// Add in deflection due to temperature differential
-		//y = y + (gamma*dT*(LCant-localX)*(LCant-localX))/(2*t);
-		return y;
-		break;
-	case 2:
-		slope = (-UW*(LCant - localX)*(LCant - localX)*(LCant - localX)) / (6 * E*I) + (UW*LCant*(LCant - localX)*(LCant - localX)) / (2 * E*I) + (-dT*gamma*(C1*C2 + C3*C4 - C2)) / (beta*t*C11);
-		return slope;
-		break;
-	case 3:
-		moment = UW*(LCant*(LCant - localX) - ((LCant - localX)*(LCant - localX))/2);
-		return moment;
-		break;
-	case 4:
-		shear = UW*(-(LCant - localX)+LCant);
-		return shear;
-		break;
-	default: return 9999999999.9;
+		old_x = new_x;
 	}
-}
 
-// Equations for free/fixed end cantilever solely due to temperature differential
-double free_temp(double gamma, double E, double I, double t, double dT, double LCant, double localX, double slope_in, int return_type){
-	double Ra, Ma, thetaA, yA, Rb, Mb, thetaB, yB, tempMo;
-
-	Ra = 0.0;
-	Ma = 0.0;
-	Rb = 0.0;
-	Mb = 0.0;
-	thetaB = 0.0;
-	yB = 0.0;
-
-	thetaA = (-gamma*dT*LCant)/t + slope_in;
-	yA = (gamma*dT*LCant*LCant) / (2 * t);
-
-	double y, slope, moment, shear;
-
-	switch (return_type)
-	{
-	case 1:
-		y = yA + thetaA*localX + (Ma*localX*localX) / (2 * E*I) + (Ra*pow(localX, 3)) / (6 * E*I) + (gamma*dT*localX*localX) / (2 * t) - (yA + thetaA*LCant + (Ma*LCant*LCant) / (2 * E*I) + (Ra*pow(LCant, 3)) / (6 * E*I) + (gamma*dT*LCant*LCant) / (2 * t));
-		return y;
-		break;
-	case 2:
-		slope = thetaA + (Ma*localX) / (E*I) + (Ra*localX*localX) / (2 * E*I) + (gamma*dT*localX) / t;
-		return slope;
-		break;
-	case 3:
-		moment = Ma + Ra*localX;
-		return moment;
-		break;
-	case 4:
-		shear = Ra;
-		return shear;
-		break;
-	default: return 9999999999.9;
-	}
-}
-
-// Deflection due to uniform load and Winkler foundation
-// Return value is dictated by return flag
-double uni_defl(double beta, double UW, double C1, double C2, double C3, double C4, double C11, double E, double I, double x, int return_type){
-
-	double Ra, Ma, thetaA, F1, F2, F3, F4, F5, yA;
-
-	//Boundary conditions for both ends free
-	Ra = 0;
-	Ma = 0;
-	thetaA = 0;
-	yA = (UW*(C4*C2 - 2 * pow(C3, 2))) / (4 * E*I*pow(beta, 4)*C11);
-
-	//Boundary condition for middle of beam free and separation point fixed
-	//thetaA = 0.0;
-	//yA = 0.0;
-	//Ra = (UW*(C1*C2 + C4*C3)) / (beta*(2 + C11));
-	//Ma = (UW*(2 * C1*C3 - C2*C2)) / (2 * beta*beta*(2 + C11));
-
-	F1 = cosh(beta*x)*cos(beta*x);
-	F2 = cosh(beta*x)*sin(beta*x) + sinh(beta*x)*cos(beta*x);
-	F3 = sinh(beta*x)*sin(beta*x);
-	F4 = cosh(beta*x)*sin(beta*x) - sinh(beta*x)*cos(beta*x);
-	F5 = 1 - cosh(beta*x)*cos(beta*x);
-
-	
-	
-	double y, slope, moment, shear;
-
-	switch (return_type)
-	{
-	case 1:
-		y = yA*F1 + (thetaA*F2) / (2 * beta) + (Ma*F3) / (2 * E*I*pow(beta, 2)) + (Ra*F4) / (4 * E*I*pow(beta, 3)) - (UW*F5) / (4 * E*I*pow(beta, 4));
-		return y;
-		break;
-	case 2:
-		slope = thetaA*F1 + (Ma*F2)/(2*E*I*beta) + (Ra*F3)/(2*E*I*beta*beta) - yA*beta*F4 - (UW*F4)/(4*E*I*pow(beta,3));
-		return slope;
-		break;
-	case 3:
-		moment = Ma*F1 + (Ra*F2)/(2*beta) - 2*yA*E*I*beta*beta*F3 - thetaA*E*I*beta*F4 - (UW*F3)/(2*beta*beta);
-		return moment;
-		break;
-	case 4:
-		shear = Ra*F1 - 2*yA*E*I*pow(beta,3)*F2 - 2*thetaA*E*I*beta*beta*F3 - Ma*beta*F4 - (UW*F2)/(2*beta);
-		return shear;
-		break;
-	default: return 9999999999.9;
-	}
-}
-
-// Deflection, slope, moment, and shear due to temperature differential
-// Return value is dictated by return flag
-double temp_defl(double dT, double beta, double t, double gamma, double E, double I, double C1, double C2, double C3, double C4, double C11, double x, int return_type){
-	
-	// Ra and Ma boundary conditions go to zero for the loading conditions
-	// of both ends free
-	double Ra, Ma, F1, F2, F3, F4, thetaA, yAT;
-
-	dT = -dT;
-
-	// Boundary for both free ends
-	thetaA = (dT*gamma*(C1*C2 + C3*C4 - C2)) / (beta*t*C11);
-	yAT = (-(dT)*gamma*(pow(C4, 2) + 2 * C1*C3 - 2 * C3)) / (2 * pow(beta, 2)*t*C11);
-	Ra = 0;
-	Ma = 0;
-
-	// Boundary with middle of full beam free and separation point fixed
-	//thetaA = 0.0;
-	//yAT = 0.0;
-	//Ra = (dT*gamma * 2 * beta*E*I*-C4) / (t*(2 + C11));
-	//Ma = (dT*gamma*E*I*(2 * C1*C1 + C2*C4 - 2 * C1)) / (t*(2 + C11));
-
-	F1 = cosh(beta*x)*cos(beta*x);
-	F2 = cosh(beta*x)*sin(beta*x) + sinh(beta*x)*cos(beta*x);
-	F3 = sinh(beta*x)*sin(beta*x);
-	F4 = cosh(beta*x)*sin(beta*x) - sinh(beta*x)*cos(beta*x);
-
-	double y, slope, moment, shear;
-	
-	
-	switch (return_type)
-	{
-	case 1:
-		y = yAT*F1 + (thetaA*F2) / (2 * beta) + (Ma*F3) / (2 * E*I*pow(beta, 2)) + (Ra*F4) / (4 * E*I*pow(beta, 3)) - ((dT)*gamma*F3) / (2 * t*pow(beta, 2));
-		return y; 
-		break;
-	case 2:
-		slope = thetaA*F1 + (Ma*F2) / (2 * E*I*beta) + (Ra*F3) / (2 * E*I*beta*beta) - yAT*beta*F4 - (dT * gamma*F2) / (2 * t*beta);
-		return slope; 
-		break;
-	case 3: 
-		moment = Ma*F1 + (Ra*F2) / (2 * beta) - 2 * yAT*E*I*beta*beta*F3 - thetaA*E*I*beta*F4 - (dT*gamma*E*I*(F1 - 1)) / t;
-		return moment;
-		break;
-	case 4: 
-		shear = Ra*F1 - 2 * yAT*E*I*pow(beta, 3)*F2 - 2 * thetaA*E*I*beta*beta*F3 - Ma*beta*F4 + (dT*gamma*E*I*beta*F4) / t;
-		return shear;
-		break;
-	default: return 9999999999.9;
-	}
-}
-
-
-
-// Calculate boundary condition factors for system
-void C_values(double L, double beta){
-	C1 = cosh(beta*L)*cos(beta*L);
-	C2 = cosh(beta*L)*sin(beta*L) + sinh(beta*L)*cos(beta*L);
-	C3 = sinh(beta*L)*sin(beta*L);
-	C4 = cosh(beta*L)*sin(beta*L) - sinh(beta*L)*cos(beta*L);
-	C11 = pow(sinh(beta*L), 2) - pow(sin(beta*L), 2);
-	C13 = cosh(beta*L)*sinh(beta*L) - cos(beta*L)*sin(beta*L);
+	return elastic_beam_length;
 }
 
 // Function that calculates a single deflection curve based on user inputs
 void type1_Analysis(){
 	std::string temp_diff, beam_thick, beam_leng, beam_width, Em, rho, cote, kvalue;
 	std::string num_points, file_name;
-	double dT, h, L, bo, E, UW, gamma, k, x;
+	double dT, h, L, bo, E, UW, gamma, k;
 	int N;
 
 	std::cout << "Enter temperature differential (deg F): ";
@@ -277,9 +138,6 @@ void type1_Analysis(){
 	std::cout << "Enter subgrade k-value (pci): ";
 	std::cin >> kvalue;
 	std::cout << kvalue << " pci\n";
-	std::cout << "How many points to generate for plot? ";
-	std::cin >> num_points;
-	std::cout << num_points << " points will be generated.\n";
 	std::cout << "Enter file name for output of points: ";
 	std::cin >> file_name;
 	std::cout << "Data points will be outputted to " << file_name;
@@ -292,13 +150,15 @@ void type1_Analysis(){
 		E = stod(Em);
 		UW = stod(rho);
 		//Convert UW to lbs/unit volume to have consistent units
-		//The Roark derivation uses a density of cross sectional volume
 		UW = UW *(1.0 / 1728.0) * (1.0*bo*h);
 		gamma = stod(cote);
 		//Convert gamma to 1E-5
 		gamma = gamma*1E-5;
 		k = stod(kvalue);
-		N = stoi(num_points);
+
+		// Points on each side of separation point
+		// 500 points should be more than adequate
+		N = 500;
 	}
 	catch (const std::invalid_argument ia){
 		std::cout << "\nOne of the values entered is incorrect.\nGeneral Error: INVALID ARGUMENT\nSpecific Error: " << ia.what() << "\nTHIS ERROR IS IRRECOVERABLE. PROGRAM TERMINATING...\n";
@@ -309,16 +169,16 @@ void type1_Analysis(){
 		exit(EXIT_FAILURE);
 	}
 
-	std::ofstream output_file1,output_file2,output_file3,output_file4;
+	std::ofstream output_file1, output_file2, output_file3, output_file4;
 	output_file1.exceptions(std::ofstream::failbit | std::ofstream::badbit);
 	output_file2.exceptions(std::ofstream::failbit | std::ofstream::badbit);
 	output_file3.exceptions(std::ofstream::failbit | std::ofstream::badbit);
 	output_file4.exceptions(std::ofstream::failbit | std::ofstream::badbit);
 	try{
-		output_file1.open(file_name+"1");
-		output_file2.open(file_name + "2");
-		output_file3.open(file_name + "3");
-		output_file4.open(file_name + "4");
+		output_file1.open(file_name + "-Deflection.txt");
+		output_file2.open(file_name + "-Slope.txt");
+		output_file3.open(file_name + "-Moment.txt");
+		output_file4.open(file_name + "-Shear.txt");
 	}
 	catch (std::ofstream::failure e){
 		std::cout << "Failure reading creating file. Please make sure the file name does not conflict with an existing name. Also make sure you have write access to the location you are outputting data to.";
@@ -328,141 +188,301 @@ void type1_Analysis(){
 	double I;
 	I = (bo*pow(h, 3)) / 12.0;
 
-	// Calculate beta factor, constant for any location
-	double beta;
-	beta = pow((bo*k) / (4 * E*I), 1.0 / 4.0);
+	// Calculate lambda factor, constant for any location
+	double lambda;
+	lambda = pow((bo*k) / (4 * E*I), 1.0 / 4.0);
 
-	// Write header for output file
-	/*output_file << "Output file from FuBeam\n";
-	output_file << "Temperature differential: " << temp_diff << " deg F\n";
-	output_file << "Beam thickness: " << beam_thick << " in\n";
-	output_file << "Beam length: " << beam_leng << " in\n";
-	output_file << "Beam width: " << beam_width << " in\n";
-	output_file << "Elastic Modulus: " << Em << " psi\n";
-	output_file << "Unit weight: " << rho << " lbs/ft3\n";
-	output_file << "Coeff. of thermal expansion: " << cote << "E-05 /F\n";
-	output_file << "Subgrade modulus: " << kvalue << " pci\n";
-	output_file << num_points << " points will be generated.\n";*/
+	// Calculate temperature moment
+	double Mt;
+	Mt = (-gamma*E*I*dT) / h;
 
-	// Try to come up with a close initial guess based simply on the foundational curling
-	double L_defl;
-	int sep_point_guess = N;
-	//C_values(L, beta);
-	bool keepGoing = true;
-	for (int i = 1; i < N; i++){
-		if (keepGoing){
-			x = ((double)i / (double)N)*L / 2;
-			C_values(2 * x, beta);
-			L_defl = temp_defl(dT, beta, h, gamma, E, I, C1, C2, C3, C4, C11, 0, 1) + uni_defl(beta, UW, C1, C2, C3, C4, C11, E, I, 0, 1);
-			if (L_defl >= 0){
-				sep_point_guess = i;
-				keepGoing = false;
-			}
-		}
+	// Find separation point
+	double elastic_beam_length;
+	elastic_beam_length = newt_rap(UW, lambda, Mt, L, k);
+
+	// Calculate prescribed moment on elastic foundation
+	// This value is the continuity between the elastic foundation
+	// and the cantilevered section
+	double MT;
+	MT = (-UW*((L/2 - elastic_beam_length)*(L/2 - elastic_beam_length))) / 2 + Mt;
+
+	// Write headers for output files
+	write_header(output_file1, temp_diff, beam_thick, beam_leng, beam_width, Em, rho, cote, kvalue, elastic_beam_length);
+	write_header(output_file2, temp_diff, beam_thick, beam_leng, beam_width, Em, rho, cote, kvalue, elastic_beam_length);
+	write_header(output_file3, temp_diff, beam_thick, beam_leng, beam_width, Em, rho, cote, kvalue, elastic_beam_length);
+	write_header(output_file4, temp_diff, beam_thick, beam_leng, beam_width, Em, rho, cote, kvalue, elastic_beam_length);
+
+	if (!solution_found){
+		output_file1 << "Epsilon threshold exceeded without finding solution!";
+		output_file2 << "Epsilon threshold exceeded without finding solution!";
+		output_file3 << "Epsilon threshold exceeded without finding solution!";
+		output_file4 << "Epsilon threshold exceeded without finding solution!";
 	}
-
-	double *ElasticTempAry = new (std::nothrow)double[N];
-	double *ElasticUniAry = new (std::nothrow)double[N];
-	double *cantAry = new (std::nothrow)double[N];
-	double *freeTempAry = new (std::nothrow)double[N];
-	double *xAry = new (std::nothrow)double[N];
-
-	double calc_x, cant_x, LCant;
-	if (ElasticTempAry == nullptr || ElasticUniAry == nullptr || xAry == nullptr || cantAry == nullptr || freeTempAry == nullptr){
-		std::cout << "Memory error in a deflection array initialization. Try again and/or ensure there is sufficient free space for the analysis.";
+	else if (max_iter_hit){
+		output_file1 << "Maximum iterations in Newton-Raphson did not yield a root solution.";
+		output_file2 << "Maximum iterations in Newton-Raphson did not yield a root solution.";
+		output_file3 << "Maximum iterations in Newton-Raphson did not yield a root solution.";
+		output_file4 << "Maximum iterations in Newton-Raphson did not yield a root solution.";
 	}
 	else{
-		for (int sel = 1; sel <= 4; sel++){
-			double sl_in = 0.0;
-			for (int i = 0; i < N; i++){
-				x = ((double)i / (double)N)*L / 2;
-				calc_x = ((double)sep_point_guess / (double)N)*L / 2 - ((double)i / (double)N)*L / 2;
-				xAry[i] = x;
-				ElasticTempAry[i] = temp_defl(dT, beta, h, gamma, E, I, C1, C2, C3, C4, C11, calc_x, sel);
-				ElasticUniAry[i] = uni_defl(beta, UW, C1, C2, C3, C4, C11, E, I, calc_x, sel);
-				cantAry[i] = 0.0;
-				freeTempAry[i] = 0.0;
-				if (i >= sep_point_guess){
-					LCant = L / 2 - ((double)sep_point_guess / (double)N)*L / 2;
-					cant_x = LCant - (((double)sep_point_guess / (double)N)*L / 2 - ((double)i / (double)N)*L / 2);
-					sl_in = temp_defl(dT, beta, h, gamma, E, I, C1, C2, C3, C4, C11, 0, 2);
-					cantAry[i] = cant_defl(dT, beta, gamma, UW, LCant, E, I, cant_x, h, sl_in, sel);
-					ElasticUniAry[i] = 0;
-					ElasticTempAry[i] = 0;
-				}
-			}
-			switch (sel){
-			case 1:
-				output_file1 << "Point of Separation: " << ((double)sep_point_guess / (double)N)*L / 2 << " inches from middle of beam.\n";
-				output_file1 << "Dist. From Middle [in]\t" << "Temp. Deflection [in]\t" << "Load Deflection [in]\t" << "Cantilever Deflection (Load) [in]\t" << "Cantilever Deflection (Temp.) [in]\t" << "Total Deflection\n";
+		// Calculate portion of beam that is on elastic foundation
+		double xs; // x-coordinate of the system (our system of beam separating from foundation)
+		double x; // since we're interested in only half the beam, we do this, follows Hetenyi's notation
+		double xp; // this is the remaining portion of the beam, see Hetenyi notation
+		double y_dis, y_mom, theta_dis, theta_mom, M_dis, M_mom, Q_dis, Q_mom;
 
-				for (int j = 0; j < N; j++){
-					output_file1 << xAry[j] << "\t";
-					output_file1 << ElasticTempAry[j] << "\t";
-					output_file1 << ElasticUniAry[j] << "\t";
-					output_file1 << cantAry[j] << "\t";
-					output_file1 << ElasticTempAry[j] + ElasticUniAry[j] + cantAry[j] << "\n";
-				}
-			case 2:
-				output_file2 << "Point of Separation: " << ((double)sep_point_guess / (double)N)*L / 2 << " inches from middle of beam.\n";
-				output_file2 << "Dist. From Middle [in]\t" << "Temp. Deflection [in]\t" << "Load Deflection [in]\t" << "Cantilever Deflection (Load) [in]\t" << "Cantilever Deflection (Temp.) [in]\t" << "Total Deflection\n";
+		double le = elastic_beam_length*2;
+		
+		for (int j = 0; j < N; j++){
+			xs = ((double)j / (double)N) * elastic_beam_length;
+			x = elastic_beam_length + xs;
+			xp = elastic_beam_length*2 - x;
 
-				for (int j = 0; j < N; j++){
-					output_file2 << xAry[j] << "\t";
-					output_file2 << ElasticTempAry[j] << "\t";
-					output_file2 << ElasticUniAry[j] << "\t";
-					output_file2 << cantAry[j] << "\t";
-					output_file2 << ElasticTempAry[j] + ElasticUniAry[j] + cantAry[j] << "\n";
-				}
-			case 3:
-				output_file3 << "Point of Separation: " << ((double)sep_point_guess / (double)N)*L / 2 << " inches from middle of beam.\n";
-				output_file3 << "Dist. From Middle [in]\t" << "Temp. Deflection [in]\t" << "Load Deflection [in]\t" << "Cantilever Deflection (Load) [in]\t" << "Cantilever Deflection (Temp.) [in]\t" << "Total Deflection\n";
+			y_dis = -UW/k;
+			y_mom = -((2*MT*lambda*lambda)/k)*(1/(sinh(lambda*le)+sin(lambda*le)))*(sinh(lambda*x)*cos(lambda*xp)-cosh(lambda*x)*sin(lambda*xp)+sinh(lambda*xp)*cos(lambda*x)-cosh(lambda*xp)*sin(lambda*x));
 
-				for (int j = 0; j < N; j++){
-					output_file3 << xAry[j] << "\t";
-					output_file3 << ElasticTempAry[j] << "\t";
-					output_file3 << ElasticUniAry[j] << "\t";
-					output_file3 << cantAry[j] << "\t";
-					output_file3 << ElasticTempAry[j] + ElasticUniAry[j] + cantAry[j] << "\n";
-				}
-			case 4:
-				output_file4 << "Point of Separation: " << ((double)sep_point_guess / (double)N)*L / 2 << " inches from middle of beam.\n";
-				output_file4 << "Dist. From Middle [in]\t" << "Temp. Deflection [in]\t" << "Load Deflection [in]\t" << "Cantilever Deflection (Load) [in]\t" << "Cantilever Deflection (Temp.) [in]\t" << "Total Deflection\n";
+			theta_dis = 0;
+			theta_mom = -((4*MT*lambda*lambda*lambda)/(k))*((cosh(lambda*x)*cos(lambda*xp)-cosh(lambda*xp)*cos(lambda*x))/(sinh(lambda*le)+sin(lambda*le)));
 
-				for (int j = 0; j < N; j++){
-					output_file4 << xAry[j] << "\t";
-					output_file4 << ElasticTempAry[j] << "\t";
-					output_file4 << ElasticUniAry[j] << "\t";
-					output_file4 << cantAry[j] << "\t";
-					output_file4 << ElasticTempAry[j] + ElasticUniAry[j] + cantAry[j] << "\n";
-				}
-			default:
-				std::cout << "Something went wrong";
+			M_dis = 0;
+			M_mom = (MT/(sinh(lambda*le)+sin(lambda*le)))*(sinh(lambda*x)*cos(lambda*xp)+cosh(lambda*x)*sin(lambda*xp)+sinh(lambda*xp)*cos(lambda*x)+cosh(lambda*xp)*sin(lambda*x));
+
+			Q_dis = 0;
+			Q_mom = (2*MT*lambda)*((sinh(lambda*x)*sin(lambda*xp)-sinh(lambda*xp)*sin(lambda*x))/(sinh(lambda*le)+sin(lambda*le)));
+
+			output_file1 << xs << "\t" << y_mom << "\t" << y_dis << "\t" << "0.000\t" << y_mom + y_dis << "\n";
+			output_file2 << xs << "\t" << theta_mom << "\t" << theta_dis << "\t" << "0.000\t" << theta_dis + theta_mom << "\n";
+			output_file3 << xs << "\t" << M_mom << "\t" << M_dis << "\t" << "0.000\t" << M_mom + M_dis << "\n";
+			output_file4 << xs << "\t" << Q_mom << "\t" << Q_dis << "\t" << "0.000\t" << Q_mom + Q_dis << "\n";
+		}
+
+		// Calculate cantilevered portion of beam
+		double LCant = L / 2 - elastic_beam_length;
+		double prev_xs = xs;
+		double eqslp; // this is the equivalent slope boundary condition
+		eqslp = ((4*MT*lambda*lambda*lambda)/k)*((cosh(lambda*le)-cos(lambda*le))/(sinh(lambda*le)+sin(lambda*le)));
+		double c_def, c_slp, c_mom, prev_c_mom, c_shr;
+		prev_c_mom = -10000000;
+		for (int k = 0; k <= N; k++){
+			xs = prev_xs + ((double)k / (double)N)*LCant;
+			x = ((double)k / (double)N)*LCant;
+
+			// M(Lcant) = Mt
+			c_shr = -UW*x + UW*LCant;
+			c_mom = -(UW*x*x) / 2 + UW*LCant*x - (UW*LCant*LCant) / 2 + Mt;
+			c_slp = -(UW*x*x*x) / (6 * E*I) + (UW*LCant*x*x) / (2 * E*I) - (UW*LCant*LCant*x) / (2 * E*I) + (Mt*x) / (E*I) + eqslp;
+			c_def = -(UW*x*x*x*x) / (24 * E*I) + (UW*LCant*x*x*x) / (6 * E*I) - (UW*LCant*LCant*x*x) / (4 * E*I) + (Mt*x*x) / (2 * E*I) + eqslp*x;
+
+			output_file1 << xs << "\t" << "0.000" << "\t" << "0.000" << "\t" << -c_def << "\t" << -c_def << "\n";
+			output_file2 << xs << "\t" << "0.000" << "\t" << "0.000" << "\t" << -c_slp << "\t" << -c_slp << "\n";
+			output_file3 << xs << "\t" << "0.000" << "\t" << "0.000" << "\t" << c_mom << "\t" << c_mom << "\n";
+			output_file4 << xs << "\t" << "0.000" << "\t" << "0.000" << "\t" << -c_shr << "\t" << -c_shr << "\n";
+
+			if (prev_c_mom < c_mom){
+				prev_c_mom = c_mom;
 			}
 		}
+		//std::cout << "\nPeak Moment: " << prev_c_mom << "\n";
+		std::cout << "\nl_e: " << elastic_beam_length << "\n";
+		std::cin >> file_name;
 	}
 
-	delete[] xAry;
-	delete[] ElasticTempAry;
-	delete[] ElasticUniAry;
-	delete[] cantAry;
-	delete[] freeTempAry;
+}
+
+void type2_Analysis(){
+	std::string app_mom, beam_thick, beam_leng, beam_width, Em, rho, cote, kvalue;
+	std::string num_points, file_name;
+	double aM, dT, h, L, bo, E, UW, gamma, k;
+	int N;
+
+	std::cout << "Enter applied moment (in*lb): ";
+	std::cin >> app_mom;
+	std::cout << app_mom << " in*lb\n";
+	std::cout << "Enter beam thickness (in): ";
+	std::cin >> beam_thick;
+	std::cout << beam_thick << " in\n";
+	std::cout << "Enter beam length (in): ";
+	std::cin >> beam_leng;
+	std::cout << beam_leng << " in\n";
+	std::cout << "Enter beam width (in): ";
+	std::cin >> beam_width;
+	std::cout << beam_width << " in\n";
+	std::cout << "Enter beam modulus of elasticity (psi): ";
+	std::cin >> Em;
+	std::cout << Em << " psi\n";
+	std::cout << "Enter beam unit weight (lbs/ft3): ";
+	std::cin >> rho;
+	std::cout << rho << " lbs/ft3\n";
+	std::cout << "Enter the beam coeff. of thermal expansion (1/F x10-5): ";
+	std::cin >> cote;
+	std::cout << cote << "E-05 /F\n";
+	std::cout << "Enter subgrade k-value (pci): ";
+	std::cin >> kvalue;
+	std::cout << kvalue << " pci\n";
+	std::cout << "Enter file name for output of points: ";
+	std::cin >> file_name;
+	std::cout << "Data points will be outputted to " << file_name;
+
+	try{
+		aM = stod(app_mom);
+		h = stod(beam_thick);
+		L = stod(beam_leng);
+		bo = stod(beam_width);
+		E = stod(Em);
+		UW = stod(rho);
+		//Convert UW to lbs/unit volume to have consistent units
+		UW = UW *(1.0 / 1728.0) * (1.0*bo*h);
+		gamma = stod(cote);
+		//Convert gamma to 1E-5
+		gamma = gamma*1E-5;
+		k = stod(kvalue);
+
+		// Points on each side of separation point
+		// 500 points should be more than adequate
+		N = 500;
+	}
+	catch (const std::invalid_argument ia){
+		std::cout << "\nOne of the values entered is incorrect.\nGeneral Error: INVALID ARGUMENT\nSpecific Error: " << ia.what() << "\nTHIS ERROR IS IRRECOVERABLE. PROGRAM TERMINATING...\n";
+		exit(EXIT_FAILURE);
+	}
+	catch (...){
+		std::cout << "\nGENERAL EXCEPTION THROWN. UNRECOVERABLE. PROGRAM TERMINATING...\n";
+		exit(EXIT_FAILURE);
+	}
+
+	std::ofstream output_file1, output_file2, output_file3, output_file4;
+	output_file1.exceptions(std::ofstream::failbit | std::ofstream::badbit);
+	output_file2.exceptions(std::ofstream::failbit | std::ofstream::badbit);
+	output_file3.exceptions(std::ofstream::failbit | std::ofstream::badbit);
+	output_file4.exceptions(std::ofstream::failbit | std::ofstream::badbit);
+	try{
+		output_file1.open(file_name + "-Deflection.txt");
+		output_file2.open(file_name + "-Slope.txt");
+		output_file3.open(file_name + "-Moment.txt");
+		output_file4.open(file_name + "-Shear.txt");
+	}
+	catch (std::ofstream::failure e){
+		std::cout << "Failure reading creating file. Please make sure the file name does not conflict with an existing name. Also make sure you have write access to the location you are outputting data to.";
+		exit(EXIT_FAILURE);
+	}
+	// Calculate moment of inertia
+	double I;
+	I = (bo*pow(h, 3)) / 12.0;
+
+	// Calculate lambda factor, constant for any location
+	double lambda;
+	lambda = pow((bo*k) / (4 * E*I), 1.0 / 4.0);
+
+	// Calculate temperature differential
+	dT = (aM*h) / (-gamma*E*I);
+
+	// Find separation point
+	double elastic_beam_length;
+	elastic_beam_length = newt_rap(UW, lambda, aM, L, k);
+
+	// Calculate prescribed moment on elastic foundation
+	// This value is the continuity between the elastic foundation
+	// and the cantilevered section
+	double MT;
+	MT = (-UW*((L/2 - elastic_beam_length)*(L/2 - elastic_beam_length)) / 2) + aM;
+
+	// Write headers for output files
+	write_header(output_file1, app_mom, beam_thick, beam_leng, beam_width, Em, rho, cote, kvalue, elastic_beam_length);
+	write_header(output_file2, app_mom, beam_thick, beam_leng, beam_width, Em, rho, cote, kvalue, elastic_beam_length);
+	write_header(output_file3, app_mom, beam_thick, beam_leng, beam_width, Em, rho, cote, kvalue, elastic_beam_length);
+	write_header(output_file4, app_mom, beam_thick, beam_leng, beam_width, Em, rho, cote, kvalue, elastic_beam_length);
+
+	if (!solution_found){
+		output_file1 << "Epsilon threshold exceeded without finding solution!";
+		output_file2 << "Epsilon threshold exceeded without finding solution!";
+		output_file3 << "Epsilon threshold exceeded without finding solution!";
+		output_file4 << "Epsilon threshold exceeded without finding solution!";
+	}
+	else if (max_iter_hit){
+		output_file1 << "Maximum iterations in Newton-Raphson did not yield a root solution.";
+		output_file2 << "Maximum iterations in Newton-Raphson did not yield a root solution.";
+		output_file3 << "Maximum iterations in Newton-Raphson did not yield a root solution.";
+		output_file4 << "Maximum iterations in Newton-Raphson did not yield a root solution.";
+	}
+	else{
+		// Calculate portion of beam that is on elastic foundation
+		double xs; // x-coordinate of the system (our system of beam separating from foundation)
+		double x; // since we're interested in only half the beam, we do this, follows Hetenyi's notation
+		double xp; // this is the remaining portion of the beam, see Hetenyi notation
+		double y_dis, y_mom, theta_dis, theta_mom, M_dis, M_mom, Q_dis, Q_mom;
+
+		double le = elastic_beam_length * 2;
+
+		for (int j = 0; j < N; j++){
+			xs = ((double)j / (double)N) * elastic_beam_length;
+			x = elastic_beam_length + xs;
+			xp = elastic_beam_length * 2 - x;
+
+			y_dis = -UW / k;
+			y_mom = -((2 * MT*lambda*lambda) / k)*(1 / (sinh(lambda*le) + sin(lambda*le)))*(sinh(lambda*x)*cos(lambda*xp) - cosh(lambda*x)*sin(lambda*xp) + sinh(lambda*xp)*cos(lambda*x) - cosh(lambda*xp)*sin(lambda*x));
+
+			theta_dis = 0;
+			theta_mom = -((4 * MT*lambda*lambda*lambda) / (k))*((cosh(lambda*x)*cos(lambda*xp) - cosh(lambda*xp)*cos(lambda*x)) / (sinh(lambda*le) + sin(lambda*le)));
+
+			M_dis = 0;
+			M_mom = (MT / (sinh(lambda*le) + sin(lambda*le)))*(sinh(lambda*x)*cos(lambda*xp) + cosh(lambda*x)*sin(lambda*xp) + sinh(lambda*xp)*cos(lambda*x) + cosh(lambda*xp)*sin(lambda*x));
+
+			Q_dis = 0;
+			Q_mom = (2 * MT*lambda)*((sinh(lambda*x)*sin(lambda*xp) - sinh(lambda*xp)*sin(lambda*x)) / (sinh(lambda*le) + sin(lambda*le)));
+
+			output_file1 << xs << "\t" << y_mom << "\t" << y_dis << "\t" << "0.000\t" << y_mom + y_dis << "\n";
+			output_file2 << xs << "\t" << theta_mom << "\t" << theta_dis << "\t" << "0.000\t" << theta_dis + theta_mom << "\n";
+			output_file3 << xs << "\t" << M_mom << "\t" << M_dis << "\t" << "0.000\t" << M_mom + M_dis << "\n";
+			output_file4 << xs << "\t" << Q_mom << "\t" << Q_dis << "\t" << "0.000\t" << Q_mom + Q_dis << "\n";
+		}
+
+		// Calculate cantilevered portion of beam
+		double LCant = L / 2 - elastic_beam_length;
+		double prev_xs = xs;
+		double eqslp; // this is the equivalent slope boundary condition
+		eqslp = ((4 * MT*lambda*lambda*lambda) / k)*((cosh(lambda*le) - cos(lambda*le)) / (sinh(lambda*le) + sin(lambda*le)));
+		double c_def, c_slp, c_mom, prev_c_mom, c_shr;
+		prev_c_mom = -10000000;
+		for (int k = 0; k <= N; k++){
+			xs = prev_xs + ((double)k / (double)N)*LCant;
+			x = ((double)k / (double)N)*LCant;
+
+			// M(Lcant) = Mt
+			c_shr = -UW*x + UW*LCant;
+			c_mom = -(UW*x*x) / 2 + UW*LCant*x - (UW*LCant*LCant) / 2 + aM;
+			c_slp = -(UW*x*x*x) / (6 * E*I) + (UW*LCant*x*x) / (2 * E*I) - (UW*LCant*LCant*x) / (2 * E*I) + (aM*x) / (E*I) + eqslp;
+			c_def = -(UW*x*x*x*x) / (24 * E*I) + (UW*LCant*x*x*x) / (6 * E*I) - (UW*LCant*LCant*x*x) / (4 * E*I) + (aM*x*x) / (2 * E*I) + eqslp*x;
+
+			output_file1 << xs << "\t" << "0.000" << "\t" << "0.000" << "\t" << -c_def << "\t" << -c_def << "\n";
+			output_file2 << xs << "\t" << "0.000" << "\t" << "0.000" << "\t" << -c_slp << "\t" << -c_slp << "\n";
+			output_file3 << xs << "\t" << "0.000" << "\t" << "0.000" << "\t" << c_mom << "\t" << c_mom << "\n";
+			output_file4 << xs << "\t" << "0.000" << "\t" << "0.000" << "\t" << -c_shr << "\t" << -c_shr << "\n";
+
+			if (prev_c_mom < c_mom){
+				prev_c_mom = c_mom;
+			}
+		}
+		//std::cout << "\nPeak Moment: " << prev_c_mom << "\n";
+		std::cout << "\nl_e: " << elastic_beam_length << "\n";
+		std::cin >> file_name;
+	}
+
 }
 
 int main(){
-	std::string typeA_in;
-	int typeAnalysis;
-
-
-	std::cout << "What type of analysis?\n1) Single Curve\n2) Iterative Curve Match\n";
-	std::cin >> typeA_in;
-	typeAnalysis = stoi(typeA_in);
-
-	if (typeAnalysis == 1){
+	int choice;
+	std::cout << "Prescribed temperature differential (1) or moment (2): ";
+	std::cin >> choice;
+	switch (choice){
+	case 1:
 		type1_Analysis();
+		break;
+	case 2:
+		type2_Analysis();
+		break;
+	default:
+		break;
 	}
-	else{
-		std::cout << "Invalid analysis method option selected. Program terminating...";
-	}
-	
+
+
 }
