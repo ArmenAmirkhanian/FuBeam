@@ -70,7 +70,7 @@ double newt_rap(double UW, double lambda, double Mt, double L, double k){
 
 	for (int i = 1; i <= max_iterations; i++){
 		MT = -(UW*((ls - old_x)*(ls - old_x))) / 2 + Mt;
-		y_dis_sup = -UW/k;
+		y_dis_sup = -UW/(k);
 		y_dis_sup_prime = 0;
 		y_mom_sup = -((2*MT*lambda*lambda)/k)*((sinh(lambda*old_x*2)-sin(lambda*old_x*2))/(sinh(lambda*old_x*2)+sin(lambda*old_x*2)));
 		y_mom_sup_prime = -((4*MT*lambda*lambda*lambda)/(k))*((cosh(lambda*old_x*2)-cos(lambda*old_x*2))/(sinh(lambda*old_x*2)+sin(lambda*old_x*2)));
@@ -96,9 +96,9 @@ double newt_rap(double UW, double lambda, double Mt, double L, double k){
 			break;
 		}
 
-		if (i == max_iterations){
-			max_iter_hit = true;
-			elastic_beam_length = -1;
+		if (i == max_iterations || new_x > ls){
+			solution_found = true;
+			elastic_beam_length = ls;
 		}
 
 		old_x = new_x;
@@ -196,9 +196,19 @@ void type1_Analysis(){
 	double Mt;
 	Mt = (-gamma*E*I*dT) / h;
 
+	// Convert k (subgrade modulus to k from Hetenyi)
+	k = k*bo;
+
 	// Find separation point
 	double elastic_beam_length;
-	elastic_beam_length = newt_rap(UW, lambda, Mt, L, k);
+	if (UW < 0.1){
+		elastic_beam_length = L / 2;
+		solution_found = true;
+	}
+	else{
+		elastic_beam_length = newt_rap(UW, lambda, Mt, L, k);
+	}
+	
 
 	// Calculate prescribed moment on elastic foundation
 	// This value is the continuity between the elastic foundation
@@ -376,9 +386,18 @@ void type2_Analysis(){
 	// Calculate temperature differential
 	dT = (aM*h) / (-gamma*E*I);
 
+	// Convert k (subgrade modulus to k from Hetenyi)
+	k = k*bo;
+
 	// Find separation point
 	double elastic_beam_length;
-	elastic_beam_length = newt_rap(UW, lambda, aM, L, k);
+	if (UW < 0.1){
+		elastic_beam_length = L / 2;
+		solution_found = true;
+	}
+	else{
+		elastic_beam_length = newt_rap(UW, lambda, aM, L, k);
+	}
 
 	// Calculate prescribed moment on elastic foundation
 	// This value is the continuity between the elastic foundation
@@ -461,9 +480,10 @@ void type2_Analysis(){
 			if (prev_c_mom < c_mom){
 				prev_c_mom = c_mom;
 			}
+
 		}
 		//std::cout << "\nPeak Moment: " << prev_c_mom << "\n";
-		std::cout << "\nl_e: " << elastic_beam_length << "\n";
+		std::cout << "\nDeflection: " << elastic_beam_length << "\n";
 		std::cin >> file_name;
 	}
 
